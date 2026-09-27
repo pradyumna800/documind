@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.pyc
+myenv/
+venv/
+.venv/
+
+# Django
+backend/db.sqlite3
+backend/staticfiles/
+backend/media/
+
+# Leftover uploaded documents from early local testing, before MEDIA_ROOT
+# was properly configured — these landed directly under backend/documents/
+# (the app folder) instead of backend/media/. Matches only numeric-named
+# subfolders (e.g. backend/documents/1/, backend/documents/2/), so it
+# never touches the actual app source files (models.py, views.py, etc.)
+# or the migrations/ folder.
+backend/documents/[0-9]*/
+
+# FastAPI / ai-service
+ai-service/__pycache__/
+
+# Environment
+.env
+.env.local
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

@@ -1,0 +1,35 @@
+# DocuMind — combined Python dependencies for BOTH services (backend + ai-service).
+#
+#   myenv\Scripts\activate
+#   pip install -r requirements.txt
+#
+# NOTE: versions are unpinned (or minimum-pinned) here on purpose. If you're
+# on a very new Python version (e.g. 3.14), older pinned releases of
+# packages like psycopg2-binary and pydantic-core may not have pre-built
+# wheels yet, forcing pip to compile from source (which needs Visual C++
+# Build Tools + Rust). Letting pip pick the latest version avoids that.
+
+# ==== Shared ====
+python-dotenv>=1.0.1
+psycopg2-binary>=2.9.10
+
+# ==== Backend (Django) ====
+Django>=5.0.6
+djangorestframework>=3.15.1
+djangorestframework-simplejwt>=5.3.1
+django-cors-headers>=4.3.1
+requests>=2.32.3
+dj-database-url>=2.1.0
+Pillow>=10.4.0
+gunicorn>=22.0.0
+whitenoise>=6.7.0
+
+# ==== AI service (FastAPI) ====
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+sqlalchemy>=2.0.35
+pgvector>=0.3.6
+openai>=1.50.0
+pypdf>=4.3.0
+python-docx>=1.1.2
+pydantic>=2.9.0

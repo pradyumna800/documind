@@ -1,0 +1,7 @@
+# Placeholder for now — we'll fill this in properly during the Docker phase (Phase 25),
+# once the backend and ai-service actually exist and we know what they need.
+#
+# For now, develop locally without Docker:
+#   - Run Postgres locally (or via a single `docker run` command) with the pgvector extension
+#   - Run Django with `python manage.py runserver`
+#   - Run FastAPI with `uvicorn app.main:app --reload`
