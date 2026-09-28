@@ -33,3 +33,6 @@ openai>=1.50.0
 pypdf>=4.3.0
 python-docx>=1.1.2
 pydantic>=2.9.0
+# Required by FastAPI to receive file uploads (Django now sends the
+# document file itself to the AI service instead of a disk path).
+python-multipart>=0.0.9

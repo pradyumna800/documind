@@ -113,6 +113,9 @@ STATIC_URL = "static/"
 # itself when DEBUG=True), but required once DEBUG=False.
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
     "staticfiles": {
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
     },
@@ -127,11 +130,11 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 #
 # HONEST PRODUCTION NOTE: this stores uploaded files on local disk, which
 # works for local dev, but most free hosting tiers (including Render's
-# free plan) do NOT guarantee that disk persists across restarts/redeploys
-# — uploaded documents could be lost. The proper production fix is object
-# storage (e.g. Cloudflare R2, which was flagged as a future step back in
-# the original project plan) — this hasn't been added yet, so treat file
-# persistence on a free-tier deployment as best-effort, not guaranteed.
+# free plan) do NOT guarantee that disk persists across restarts/redeploys.
+# Document TEXT/embeddings live safely in the database, so chat and study
+# features keep working — but the original uploaded files and avatar
+# images can disappear. The proper fix is object storage (e.g. Cloudflare
+# R2), which hasn't been added yet.
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
@@ -164,6 +167,12 @@ CSRF_TRUSTED_ORIGINS = os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",") if 
 
 # ---- Security (only meaningfully active when DEBUG=False, i.e. production) ----
 if not DEBUG:
+    # Render (like most hosts) terminates HTTPS at its own proxy and then
+    # talks plain HTTP to Django. Without this line, Django never learns the
+    # ORIGINAL request was HTTPS, so SECURE_SSL_REDIRECT below would redirect
+    # every request to HTTPS forever — an infinite redirect loop. This tells
+    # Django to trust the proxy's X-Forwarded-Proto header instead.
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     SECURE_SSL_REDIRECT = os.environ.get("SECURE_SSL_REDIRECT", "True") == "True"
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True

@@ -5,6 +5,8 @@ Centralizing this here means every call automatically includes the
 internal shared-secret header, and nowhere else in the codebase has to
 remember to add it.
 """
+import os
+
 import requests
 from django.conf import settings
 
@@ -25,24 +27,31 @@ def _raise_with_body(response):
 
 
 def trigger_document_processing(document_id: int, user_id: int, file_path: str, file_type: str, document_name: str):
-    """Tell the AI service to extract text, chunk it, embed it, and store it.
+    """Send the document to the AI service to extract text, chunk it,
+    embed it, and store it.
+
+    The file's BYTES are uploaded, not just its path: in production Django
+    and the AI service run on separate servers with separate disks, so a
+    path that exists here would not exist there. (Locally they share a
+    machine, which is why passing a path used to work and hid this.)
 
     We pass user_id explicitly because Django is the source of truth for
     identity — FastAPI trusts this value ONLY because it arrives over this
     internal, key-protected channel, never from a public request.
     """
-    response = requests.post(
-        f"{settings.FASTAPI_BASE_URL}/internal/process-document",
-        json={
-            "document_id": document_id,
-            "user_id": user_id,
-            "file_path": file_path,
-            "file_type": file_type,
-            "document_name": document_name,
-        },
-        headers=_headers(),
-        timeout=300,  # local embedding models can be slow — see stream_answer() note below
-    )
+    with open(file_path, "rb") as fh:
+        response = requests.post(
+            f"{settings.FASTAPI_BASE_URL}/internal/process-document",
+            data={
+                "document_id": document_id,
+                "user_id": user_id,
+                "file_type": file_type,
+                "document_name": document_name,
+            },
+            files={"file": (os.path.basename(file_path), fh, "application/octet-stream")},
+            headers=_headers(),
+            timeout=600,  # embedding a long document one chunk at a time can be slow
+        )
     _raise_with_body(response)
     return response.json()
 
@@ -86,12 +95,6 @@ def stream_answer(user_id: int, conversation_id: int, question: str, document_id
     Opens a streaming connection to the AI service and yields each SSE
     line ("data: {...}") exactly as FastAPI sent it, so Django can proxy
     them straight through to the browser without re-parsing the content.
-
-    Timeout is generous because local models via Ollama run on your CPU
-    rather than a fast cloud GPU — the FIRST question after starting
-    Ollama is especially slow since it has to load the model into memory
-    before it can generate anything at all. A hosted API like OpenAI
-    would typically respond in a few seconds.
     """
     response = requests.post(
         f"{settings.FASTAPI_BASE_URL}/internal/query-stream",
@@ -115,15 +118,7 @@ def stream_answer(user_id: int, conversation_id: int, question: str, document_id
 
 def trigger_study_materials(document_id: int, user_id: int):
     """Ask the AI service to generate a summary/glossary/quiz for a whole
-    document.
-
-    This is the single heaviest local-model call in the whole app — it
-    reads much more text at once than a normal question, and has to
-    generate a much longer, more structured response (summary + terms +
-    quiz). On a CPU-only local Ollama setup this can genuinely take
-    several minutes, so the timeout here is intentionally much higher
-    (15 minutes) than the other calls.
-    """
+    document. Generous timeout, since this is the heaviest LLM call in the app."""
     response = requests.post(
         f"{settings.FASTAPI_BASE_URL}/internal/study-materials",
         json={"document_id": document_id, "user_id": user_id},
