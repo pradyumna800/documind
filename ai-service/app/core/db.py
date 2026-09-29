@@ -12,13 +12,32 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from .config import settings
 
-# SQLAlchemy dropped support for the short "postgres://" URL prefix (Django
-# still accepts it fine via dj-database-url). Normalizing it here means the
-# same DATABASE_URL in .env works for both services without needing two
-# different values.
-_db_url = settings.database_url
-if _db_url.startswith("postgres://"):
-    _db_url = _db_url.replace("postgres://", "postgresql://", 1)
+
+def _normalize_db_url(url: str) -> str:
+    """
+    Two fixes to the raw DATABASE_URL before handing it to SQLAlchemy:
+
+    1. SQLAlchemy dropped support for the short "postgres://" prefix
+       (Django still accepts it fine via dj-database-url) — normalize it
+       to "postgresql://" so the same DATABASE_URL works for both services.
+
+    2. A bare "postgresql://" lets SQLAlchemy auto-pick a driver, and on
+       newer SQLAlchemy versions that auto-pick can land on "psycopg"
+       (version 3) even when only "psycopg2-binary" (what's actually in
+       requirements.txt) is installed — failing with
+       "ModuleNotFoundError: No module named 'psycopg'" at connection
+       time, not at install time, which makes it a confusing runtime
+       surprise instead of an install-time error. Being explicit
+       ("postgresql+psycopg2://") removes the guesswork entirely.
+    """
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
+    if url.startswith("postgresql://"):
+        url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
+    return url
+
+
+_db_url = _normalize_db_url(settings.database_url) if settings.database_url else ""
 
 engine = create_engine(_db_url, pool_pre_ping=True) if _db_url else None
 SessionLocal = sessionmaker(bind=engine) if engine else None

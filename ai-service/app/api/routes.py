@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import shutil
 import tempfile
@@ -13,6 +14,10 @@ from app.rag.pipeline import (
 )
 
 router = APIRouter()
+
+# Uses uvicorn's own logger so messages show up in the same terminal, with
+# the same formatting, as the server's request logs.
+logger = logging.getLogger("uvicorn.error")
 
 ALLOWED_FILE_TYPES = {"pdf", "txt", "docx"}
 
@@ -106,6 +111,13 @@ def query_stream_endpoint(payload: QueryRequest):
             history=payload.history,
             mode=payload.mode,
         ):
+            # The pipeline catches failures and turns them into an "error"
+            # event so the browser gets a clean message instead of a broken
+            # stream. That also means the REAL cause (bad API key, retired
+            # model name, rate limit...) never reached any log — so record
+            # it here, where the operator can actually see it.
+            if event.get("type") == "error":
+                logger.error("Streaming answer failed: %s", event.get("detail"))
             yield f"data: {json.dumps(event)}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
