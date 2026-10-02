@@ -1,11 +1,43 @@
 import { API_BASE_URL } from './client'
 
 /**
+ * Attempts to get a fresh access token using the stored refresh token.
+ * Mirrors the same refresh logic in client.js's axios interceptor, but
+ * streamAsk() can't reuse that interceptor directly since it uses raw
+ * fetch() instead of axios (see the comment below on why).
+ */
+async function refreshAccessToken() {
+  const refreshToken = localStorage.getItem('refresh_token')
+  if (!refreshToken) return null
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/refresh/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh: refreshToken }),
+    })
+    if (!response.ok) return null
+    const data = await response.json()
+    localStorage.setItem('access_token', data.access)
+    return data.access
+  } catch {
+    return null
+  }
+}
+
+/**
  * Consumes the Server-Sent Events stream from POST /conversations/:id/ask-stream/.
  * Uses raw fetch() + ReadableStream rather than axios, because axios (being
  * XHR-based in the browser) doesn't expose a readable stream of the
  * response body as it arrives — fetch does, which is what actually lets us
  * update the UI token-by-token instead of waiting for the whole response.
+ *
+ * Because this bypasses axios, it also bypasses axios's automatic 401-retry
+ * interceptor in client.js — so a session open longer than the access
+ * token's lifetime (1 hour) would otherwise fail here even while every
+ * other part of the app (which does use axios) kept working fine. This
+ * retries once with a refreshed token before giving up, matching the same
+ * behavior the rest of the app already has.
  *
  * Callbacks:
  *   onSources(sources)   — called once, as soon as retrieval finishes
@@ -13,7 +45,7 @@ import { API_BASE_URL } from './client'
  *   onDone()              — called once, when the stream ends normally
  *   onError(message)      — called if the stream fails or the server reports an error
  */
-export async function streamAsk(conversationId, { question, documentIds, mode }, { onSources, onChunk, onDone, onError }) {
+export async function streamAsk(conversationId, { question, documentIds, mode }, { onSources, onChunk, onDone, onError }, _isRetry = false) {
   const token = localStorage.getItem('access_token')
 
   let response
@@ -28,6 +60,18 @@ export async function streamAsk(conversationId, { question, documentIds, mode },
     })
   } catch (err) {
     onError('Could not reach the server.')
+    return
+  }
+
+  if (response.status === 401 && !_isRetry) {
+    const newToken = await refreshAccessToken()
+    if (newToken) {
+      return streamAsk(conversationId, { question, documentIds, mode }, { onSources, onChunk, onDone, onError }, true)
+    }
+    // Refresh token itself is expired/invalid too — a genuine re-login is needed.
+    localStorage.removeItem('access_token')
+    localStorage.removeItem('refresh_token')
+    window.location.href = '/login'
     return
   }
 
