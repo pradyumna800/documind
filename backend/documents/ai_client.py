@@ -6,6 +6,7 @@ internal shared-secret header, and nowhere else in the codebase has to
 remember to add it.
 """
 import os
+import time
 
 import requests
 from django.conf import settings
@@ -26,6 +27,35 @@ def _raise_with_body(response):
         raise requests.HTTPError(f"{exc} — response body: {response.text}") from exc
 
 
+# On a free hosting tier, the AI service's own server can be fully asleep
+# after inactivity. The FIRST request to wake it can get an immediate 502
+# from the host's own proxy (returned before the app has even started
+# listening), rather than being queued until it's ready. Retrying a couple
+# of times with a short wait is what papers over this — by the second or
+# third attempt, the service is reliably awake. This has nothing to do
+# with request correctness; it's purely about giving a cold host time to
+# finish booting.
+_WAKE_UP_RETRIES = 3
+_WAKE_UP_DELAY_SECONDS = 8
+
+
+def _post_with_wakeup_retry(url: str, **kwargs) -> requests.Response:
+    last_exc = None
+    for attempt in range(_WAKE_UP_RETRIES):
+        try:
+            response = requests.post(url, **kwargs)
+            if response.status_code == 502 and attempt < _WAKE_UP_RETRIES - 1:
+                time.sleep(_WAKE_UP_DELAY_SECONDS)
+                continue
+            return response
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            last_exc = exc
+            if attempt < _WAKE_UP_RETRIES - 1:
+                time.sleep(_WAKE_UP_DELAY_SECONDS)
+                continue
+    raise last_exc
+
+
 def trigger_document_processing(document_id: int, user_id: int, file_path: str, file_type: str, document_name: str):
     """Send the document to the AI service to extract text, chunk it,
     embed it, and store it.
@@ -40,7 +70,7 @@ def trigger_document_processing(document_id: int, user_id: int, file_path: str, 
     internal, key-protected channel, never from a public request.
     """
     with open(file_path, "rb") as fh:
-        response = requests.post(
+        response = _post_with_wakeup_retry(
             f"{settings.FASTAPI_BASE_URL}/internal/process-document",
             data={
                 "document_id": document_id,
@@ -59,7 +89,7 @@ def trigger_document_processing(document_id: int, user_id: int, file_path: str, 
 def trigger_document_deletion(document_id: int, user_id: int):
     """Tells the AI service to delete this document's chunks/embeddings.
     Called before/alongside deleting the Document row in Django."""
-    response = requests.post(
+    response = _post_with_wakeup_retry(
         f"{settings.FASTAPI_BASE_URL}/internal/delete-document",
         json={"document_id": document_id, "user_id": user_id},
         headers=_headers(),
@@ -73,7 +103,7 @@ def ask_question(user_id: int, conversation_id: int, question: str, document_ids
     """Ask the AI service to run RAG + generate an answer for this question
     all at once (non-streaming). Kept for any caller that doesn't need
     streaming; the chat UI itself uses stream_answer() below instead."""
-    response = requests.post(
+    response = _post_with_wakeup_retry(
         f"{settings.FASTAPI_BASE_URL}/internal/query",
         json={
             "user_id": user_id,
@@ -95,8 +125,12 @@ def stream_answer(user_id: int, conversation_id: int, question: str, document_id
     Opens a streaming connection to the AI service and yields each SSE
     line ("data: {...}") exactly as FastAPI sent it, so Django can proxy
     them straight through to the browser without re-parsing the content.
+
+    Uses the same wake-up retry as the other calls, but only for the
+    INITIAL connection attempt — once the stream actually starts, there's
+    real content to lose, so no retry happens mid-stream.
     """
-    response = requests.post(
+    response = _post_with_wakeup_retry(
         f"{settings.FASTAPI_BASE_URL}/internal/query-stream",
         json={
             "user_id": user_id,
@@ -119,7 +153,7 @@ def stream_answer(user_id: int, conversation_id: int, question: str, document_id
 def trigger_study_materials(document_id: int, user_id: int):
     """Ask the AI service to generate a summary/glossary/quiz for a whole
     document. Generous timeout, since this is the heaviest LLM call in the app."""
-    response = requests.post(
+    response = _post_with_wakeup_retry(
         f"{settings.FASTAPI_BASE_URL}/internal/study-materials",
         json={"document_id": document_id, "user_id": user_id},
         headers=_headers(),
