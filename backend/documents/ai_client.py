@@ -28,15 +28,18 @@ def _raise_with_body(response):
 
 
 # On a free hosting tier, the AI service's own server can be fully asleep
-# after inactivity. The FIRST request to wake it can get an immediate 502
-# from the host's own proxy (returned before the app has even started
-# listening), rather than being queued until it's ready. Retrying a couple
-# of times with a short wait is what papers over this — by the second or
-# third attempt, the service is reliably awake. This has nothing to do
-# with request correctness; it's purely about giving a cold host time to
-# finish booting.
-_WAKE_UP_RETRIES = 3
-_WAKE_UP_DELAY_SECONDS = 8
+# after inactivity, and waking it fully can take 50-90+ seconds. The FIRST
+# request to wake it can get an immediate 502 from the host's own proxy
+# (returned before the app has even started listening), rather than being
+# queued until it's ready. 6 retries x 10s covers up to ~60s of wake-up
+# time, which must be paired with a Gunicorn --timeout long enough to let
+# a single Django request actually wait that long (see Render's Start
+# Command: `gunicorn config.wsgi --bind 0.0.0.0:$PORT --timeout 120`) — by
+# default Gunicorn kills any request after 30s, which was silently
+# cutting these retries off before they could finish, no matter how long
+# this loop was willing to wait.
+_WAKE_UP_RETRIES = 6
+_WAKE_UP_DELAY_SECONDS = 10
 
 
 def _post_with_wakeup_retry(url: str, **kwargs) -> requests.Response:
