@@ -15,6 +15,6 @@ def on_startup():
     init_vector_store()
 
 
-@app.get("/health", methods=["GET", "HEAD"])
+@app.api_route("/health", methods=["GET", "HEAD"])
 def health():
     return {"status": "ok"}
